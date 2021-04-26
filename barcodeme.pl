@@ -5,6 +5,8 @@
 # given kmer length and Hamming distance
 #
 # author: Georgi Tushev
+# Scientific Computing Facility
+# Max Planck Institute for Brain Research
 # bugs: sciclist@brain.mpg.de
 # v0.1, Apr 2021
 
@@ -13,35 +15,49 @@ use strict;
 use Getopt::Long;
 
 sub usage($);
-sub parseargs();
-sub kmersampler($);
-sub samplepool($$);
-sub hammingdist($$);
-sub findset($$$);
-sub printset($$$);
-sub printdist($$);
+sub parseArgs();
+sub isRepeat($);
+sub isPalindrome($);
+sub isGCbiased($$$);
+sub editDistance($$);
+sub indexIterator($$);
+sub indexToKmer($$);
+sub generatePool($$$);
+sub findSet($$$);
+sub printSet($$$);
+sub printDist($$);
 
 main:{
     my ($kmer_size,
         $dist_value,
         $list_size,
-        $file_table) = parseargs();
+        $file_table) = parseArgs();
 
+    my @alphabet = qw/A C G T/;
     my %kmer_pool = ();
     my %kmer_set = ();
     my @kmer_list = ();
 
-    samplepool(\%kmer_pool, $kmer_size);
-    findset(\%kmer_set, \%kmer_pool, $dist_value);
-    printset(\@kmer_list, \%kmer_set, $list_size);
-    printdist(\@kmer_list, $file_table) if (defined($file_table));
+    generatePool(\%kmer_pool, $kmer_size, \@alphabet);
+    print STDERR "pool size: ", scalar(keys %kmer_pool), "\n";
+
+    # magic seed word is the zero word
+    my $magic_seed = ($alphabet[0]) x $kmer_size;
+    $kmer_set{$magic_seed}++;
+
+    findSet(\%kmer_set, \%kmer_pool, $dist_value);
+    delete($kmer_set{$magic_seed});
+    print STDERR "set size: ", scalar(keys %kmer_set), "\n";
+
+    printSet(\@kmer_list, \%kmer_set, $list_size);
+    printDist(\@kmer_list, $file_table) if (defined($file_table));
 }
 
 
 
-## printdist
+## printDist
 ## prints distance matrix to file
-sub printdist($$)
+sub printDist($$)
 {
     my $kmer_list = $_[0];
     my $file_table = $_[1];
@@ -51,7 +67,7 @@ sub printdist($$)
     foreach my $kmer_qry (@{$kmer_list}) {
         my @dist_list = ();
         foreach my $kmer_ref (@{$kmer_list}) {
-            my $dist = hammingdist($kmer_qry, $kmer_ref);
+            my $dist = editDistance($kmer_qry, $kmer_ref);
             push(@dist_list, $dist);
         }
         print $fh $kmer_qry, "\t", join(",", @dist_list), "\n";
@@ -62,9 +78,9 @@ sub printdist($$)
 
 
 
-## printset
+## printSet
 ## prints final set to STDOUT
-sub printset($$$)
+sub printSet($$$)
 {
     my $kmer_list = $_[0];
     my $kmer_set = $_[1];
@@ -79,85 +95,64 @@ sub printset($$$)
 }
 
 
-
-## findset
-## randomly seeds a hash set
-## extends set with given distance
-sub findset($$$)
+## findSet
+## Conway’s Lexicode Algorithm
+sub findSet($$$)
 {
     my $kmer_set = $_[0];
     my $kmer_pool = $_[1];
     my $dist_value = $_[2];
-
-    # key step is choosing seed kmer
-    # greedy algorithm for random seed in pool
-    # everytime generates a different set
-    print STDERR "find kmer set ... ";
-
-    foreach my $kmer_qry (keys %{$kmer_pool}) {
-        my $dist_min = length($kmer_qry);
-        foreach my $kmer_ref (keys %{$kmer_set}) {
-            my $dist = hammingdist($kmer_qry, $kmer_ref);
-            $dist_min = $dist if($dist < $dist_min);
+    foreach my $kmer_qry (sort keys %{$kmer_pool}) {
+        my $dist_max = length($kmer_qry);
+        foreach my $kmer_ref (sort keys %{$kmer_set}) {
+            my $dist = editDistance($kmer_qry, $kmer_ref);
+            $dist_max = $dist if ($dist_max >= $dist);
         }
-
-        $kmer_set->{$kmer_qry}++ if($dist_min >= $dist_value);
+        $kmer_set->{$kmer_qry} = 0 if ($dist_value <= $dist_max);
     }
-
-    print STDERR "done. size: ", scalar(keys %{$kmer_set}), "\n";
 }
 
 
 
-## hammingdist
-## count mismatches in strings with equal length
-sub hammingdist($$)
-{
-    my $word_a = $_[0];
-    my $word_b = $_[1];
-
-    return -1 if(length($word_a) != length($word_b));
-
-    my $dist = $word_a ^ $word_b;
-    return $dist =~ tr/\0//c;
-}
-
-
-
-## samplepool
-## iterate all kmer permutations
-sub samplepool($$)
+## generatePool
+## explore all permutation of given alphabet
+## filter repeats is crucial for the magic seed ;)
+sub generatePool($$$)
 {
     my $kmer_pool = $_[0];
     my $kmer_size = $_[1];
-    my $iterator = kmersampler($kmer_size);
-    
-    print STDERR "sample kmer pool ... ";
-
-    while (my $kmer = $iterator->()) {
-    
-        # skip kmers with repeated bases (> 2)
-        next if($kmer =~ m/([ACGT])\1{2,}/); 
-        
-        # skip palindroms
-        next if ($kmer eq reverse($kmer));
-        
-        # add more filters (e.g. GC-content)
-        $kmer_pool->{$kmer}++;
+    my $alphabet = $_[2];
+    my $iterator = indexIterator($kmer_size, scalar(@{$alphabet}));
+    my $position = 0;
+    while (my $index = $iterator->()) {
+        my $kmer = indexToKmer($index, $alphabet);
+        next if (isRepeat($kmer));
+        next if (isPalindrome($kmer));
+        next if (isGCbiased($kmer, 0.3, 0.7));
+        $kmer_pool->{$kmer} = $position++;
     }
-    
-    print STDERR "done. size: ", scalar(keys %{$kmer_pool}), "\n";
 }
 
 
 
-## kmersampler
-## iterator over kmer permutations
-sub kmersampler($)
+## indexToKmer
+## convert base 4 index to DNA
+sub indexToKmer($$)
+{
+    my $index = $_[0];
+    my $alphabet = $_[1];
+    return join("", map { $alphabet->[$_] } @{$index});
+}
+
+
+
+## indexIterator
+## all permutation for given
+## word size and alphabet size
+sub indexIterator($$)
 {
     my $k = $_[0];
-    my @alphabet = ("A", "C", "T", "G");  
-    my $alphabet_size = scalar(@alphabet);
+    my $alphabet_size = $_[1];
     my @index;
     my $step = ($k - 1);
 
@@ -175,15 +170,69 @@ sub kmersampler($)
             }
         }
         return undef if($step < 0);
-        return join("", map { $alphabet[$_] } @index);
+        return \@index;
     };
 }
 
 
 
-## parseargs
+## editDistance
+## Hamming distance (number of mismatches)
+sub editDistance($$)
+{
+    my $dist = $_[0] ^ $_[1];
+    return ($dist =~ tr/\0//c);
+}
+
+
+
+## isRepeat
+## use RegEx to filter various seq. repeats 
+sub isRepeat($)
+{
+    my $kmer = $_[0];
+    my $is_repeat = 0;
+
+    # skip mono-repeats (> 2)
+    $is_repeat = 1 if ($kmer =~ m/([ACGT])\1{2,}/); 
+
+    # skip 2-repeats (e.g. ACACACAC) 
+    $is_repeat = 1 if ($kmer =~ m/([ACGT][ACGT])\1{2,}/);
+
+    # skip 3-repeats (e.g. ACGACGACG)
+    $is_repeat = 1 if ($kmer =~ m/([ACGT][ACGT][ACGT])\1{1,}/);
+
+    return $is_repeat;
+}
+
+
+
+## isPalindrome
+## forward equals backwards
+sub isPalindrome($)
+{
+    return ($_[0] eq reverse($_[0]));
+}
+
+
+
+## isGCbiased
+## accepted range [0.3, 0.7]
+## can be added as user argument
+sub isGCbiased($$$)
+{
+    my $kmer = $_[0];
+    my $gc_min = $_[1];
+    my $gc_max = $_[2];
+    my $gc = ($kmer =~ tr/[GC]//c) / length($kmer);
+    return (($gc < $gc_min) || ($gc_max < $gc));
+}
+
+
+
+## parseArgs
 ## parses @ARGV for options
-sub parseargs()
+sub parseArgs()
 {
     # defaults
     my $kmer_size = 6;
