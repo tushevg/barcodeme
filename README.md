@@ -36,7 +36,7 @@ perl barcodeme.pl -k 6 -d 3 -l 96 -o barcodes_dist.txt > barcodes_list.txt
 
 ## references
 John H. [Conway](https://ieeexplore.ieee.org/document/1057187) and N. J. A. Sloane<br>
-Lexicographic Codes: Error-Correcting Codes from Grame Theory<br>
+Lexicographic Codes: Error-Correcting Codes from Game Theory<br>
 IEEE Transactions on information theory, Volume: 32, Issue: 3, May 1986<br>
 
 Dan [Ashlock](https://ieeexplore.ieee.org/document/1004430), Ling Guo and Fang Qiu<br>
