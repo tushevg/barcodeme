@@ -24,7 +24,7 @@ sub indexIterator($$);
 sub indexToKmer($$);
 sub generatePool($$$);
 sub findSet($$$);
-sub printSet($$$);
+sub printSet($$);
 sub printDist($$);
 
 main:{
@@ -34,23 +34,22 @@ main:{
         $file_table) = parseArgs();
 
     my @alphabet = qw/A C G T/;
-    my %kmer_pool = ();
-    my %kmer_set = ();
-    my @kmer_list = ();
-
-    generatePool(\%kmer_pool, $kmer_size, \@alphabet);
-    print STDERR "pool size: ", scalar(keys %kmer_pool), "\n";
+    my @kmer_pool = ();
+    my @kmer_set = ();
+    
+    generatePool(\@kmer_pool, $kmer_size, \@alphabet);
+    print STDERR "pool size: ", scalar(@kmer_pool), "\n";
 
     # magic seed word is the zero word
     my $magic_seed = ($alphabet[0]) x $kmer_size;
-    $kmer_set{$magic_seed}++;
+    push(@kmer_set, $magic_seed);
 
-    findSet(\%kmer_set, \%kmer_pool, $dist_value);
-    delete($kmer_set{$magic_seed});
-    print STDERR "set size: ", scalar(keys %kmer_set), "\n";
+    findSet(\@kmer_set, \@kmer_pool, $dist_value);
+    shift @kmer_set; # remove magic seed
+    print STDERR "set size: ", scalar(@kmer_set), "\n";
 
-    printSet(\@kmer_list, \%kmer_set, $list_size);
-    printDist(\@kmer_list, $file_table) if (defined($file_table));
+    printSet(\@kmer_set, $list_size);
+    printDist(\@kmer_set, $file_table) if (defined($file_table));
 }
 
 
@@ -80,18 +79,16 @@ sub printDist($$)
 
 ## printSet
 ## prints final set to STDOUT
-sub printSet($$$)
+sub printSet($$)
 {
-    my $kmer_list = $_[0];
-    my $kmer_set = $_[1];
-    my $list_size = $_[2];
+    my $kmer_set = $_[0];
+    my $list_size = $_[1];
 
-    foreach my $kmer (sort keys %{$kmer_set}) {
-        print $kmer, "\n";
-        push(@{$kmer_list}, $kmer);
-        $list_size--;
-        last if ($list_size == 0);
+    if ((0 < $list_size) && ($list_size <= scalar(@{$kmer_set}))) {
+        @{$kmer_set} = @{$kmer_set}[0 .. ($list_size - 1)];
     }
+
+    print join("\n", @{$kmer_set}), "\n";
 }
 
 
@@ -103,13 +100,13 @@ sub findSet($$$)
     my $kmer_set = $_[0];
     my $kmer_pool = $_[1];
     my $dist_value = $_[2];
-    foreach my $kmer_qry (sort keys %{$kmer_pool}) {
+    foreach my $kmer_qry (@{$kmer_pool}) {
         my $dist_max = length($kmer_qry);
-        foreach my $kmer_ref (sort keys %{$kmer_set}) {
+        foreach my $kmer_ref (@{$kmer_set}) {
             my $dist = editDistance($kmer_qry, $kmer_ref);
             $dist_max = $dist if ($dist_max >= $dist);
         }
-        $kmer_set->{$kmer_qry} = 0 if ($dist_value <= $dist_max);
+        push(@{$kmer_set}, $kmer_qry) if ($dist_value <= $dist_max);
     }
 }
 
@@ -124,13 +121,12 @@ sub generatePool($$$)
     my $kmer_size = $_[1];
     my $alphabet = $_[2];
     my $iterator = indexIterator($kmer_size, scalar(@{$alphabet}));
-    my $position = 0;
     while (my $index = $iterator->()) {
         my $kmer = indexToKmer($index, $alphabet);
         next if (isRepeat($kmer));
         next if (isPalindrome($kmer));
         next if (isGCbiased($kmer, 0.3, 0.7));
-        $kmer_pool->{$kmer} = $position++;
+        push(@{$kmer_pool}, $kmer);
     }
 }
 
@@ -165,12 +161,12 @@ sub indexIterator($$)
             my $i = $k;
             while (--$i >= 0) {
                 $index[$i]++;
-                last if($index[$i] < $alphabet_size);
+                last if ($index[$i] < $alphabet_size);
                 $index[$i] = 0;
                 $step-- if ($step == $i);
             }
         }
-        return undef if($step < 0);
+        return undef if ($step < 0);
         return \@index;
     };
 }
